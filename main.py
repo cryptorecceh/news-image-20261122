@@ -148,9 +148,13 @@ class Surface:
                 ay += sy
 
     def circle(self, cx, cy, r, c):
-        for yy in range(-r, r + 1):
-            xx = int((r * r - yy * yy) ** 0.5)
-            self.rect(cx - xx, cy + yy, 2 * xx + 1, 1, c)
+        r2 = r * r
+        for yy in range(cy - r, cy + r + 1):
+            dy = yy - cy
+            for xx in range(cx - r, cx + r + 1):
+                dx = xx - cx
+                if dx * dx + dy * dy <= r2:
+                    self.set(xx, yy, c)
 
     def ring(self, cx, cy, r, c):
         steps = max(24, 6 * r)
@@ -218,26 +222,33 @@ class Typer:
 
     def wrap(self, name, s, maxw):
         """Greedy word wrap; returns a list of lines (never empty)."""
-        words = s.split(" ")
+        space = self.width(name, " ")
         lines = []
-        line = ""
-        for word in words:
-            cand = word if not line else line + " " + word
-            if self.width(name, cand) <= maxw:
-                line = cand
-            else:
-                if line:
-                    lines.append(line)
-                while self.width(name, word) > maxw and len(word) > 1:
-                    # hard-split an over-long word
-                    n = len(word)
-                    while n > 1 and self.width(name, word[:n]) > maxw:
-                        n -= 1
-                    lines.append(word[:n])
-                    word = word[n:]
-                line = word
-        if line or not lines:
-            lines.append(line)
+        cur_words = []
+        cur_w = 0
+        for word in s.split(" "):
+            ww = self.width(name, word)
+            add = ww if not cur_words else space + ww
+            if cur_w + add <= maxw:
+                cur_words.append(word)
+                cur_w += add
+                continue
+            if cur_words:
+                lines.append(" ".join(cur_words))
+                cur_words = []
+                cur_w = 0
+            while ww > maxw and len(word) > 1:
+                # hard-split an over-long word
+                n = len(word)
+                while n > 1 and self.width(name, word[:n]) > maxw:
+                    n -= 1
+                lines.append(word[:n])
+                word = word[n:]
+                ww = self.width(name, word)
+            cur_words = [word]
+            cur_w = ww
+        if cur_words or not lines:
+            lines.append(" ".join(cur_words))
         return lines
 
 # ---------------------------------------------------------------- PNG out
@@ -298,14 +309,16 @@ def encode_png_bytes(pg):
     for y in range(h):
         row = raw[y * stride:(y + 1) * stride]
         best = None
-        best_len = None
+        best_score = None
         best_kind = 0
         for kind in range(5):
             trial = _filter_scanline(kind, row, prev)
-            size = len(zlib.compress(trial, 6))
-            if best_len is None or size < best_len:
+            score = 0
+            for byte in trial:
+                score += byte if byte < 128 else 256 - byte
+            if best_score is None or score < best_score:
                 best = trial
-                best_len = size
+                best_score = score
                 best_kind = kind
         stream.append(best_kind)
         stream += best
@@ -318,120 +331,115 @@ def encode_png_bytes(pg):
 
 
 # ---------------------------------------------------------------- data
-# Stories are stored in my own compact tuple shape: (kicker, headline,
-# body, source). Kicker = section label shown in red; body = one or two
-# short sentences condensed to fit the layout; source = attribution.
+# Stories are stored as dicts with named fields. Kicker = section label
+# shown in red; body/detail = one or two short sentences condensed to
+# fit the layout; source = attribution.
 LEADS = [
-    ("BAHRAIN \u00b7 GULF",
-     "Iran hits US bases in Bahrain",
-     "IRGC missiles and drones hit al-Riffa and Awali bases; it "
-     "claims two Patriot radars destroyed; Bahrain says a factory "
-     "burned, no one hurt.",
-     "Sources: Reuters, Al Jazeera"),
-    ("CLIMATE \u00b7 COP31",
-     "COP31 stuck in overtime, no deal",
-     "Talks run into Sunday with no final text; the draft drops "
-     "fossil fuels and the $120bn adaptation goal.",
-     "Sources: Reuters, AP"),
-    ("MEXICO \u00b7 CARTELS",
-     "Mexico seizes 'El Chapo Isidro'",
-     "FBI Top 10 fugitive caught in Guasave; 11 killed as gunmen "
-     "hit back with burning roadblocks.",
-     "Sources: Reuters, AP"),
+    {"kicker": "BAHRAIN \u00b7 GULF",
+     "headline": "Iran hits US bases in Bahrain",
+     "body": "IRGC missiles and drones hit al-Riffa and Awali bases; it claims two Patriot radars destroyed; Bahrain says a factory burned, no one hurt.",
+     "source": "Sources: Reuters, Al Jazeera"},
+    {"kicker": "CLIMATE \u00b7 COP31",
+     "headline": "COP31 stuck in overtime, no deal",
+     "body": "Talks run into Sunday with no final text; the draft drops fossil fuels and the $120bn adaptation goal.",
+     "source": "Sources: Reuters, AP"},
+    {"kicker": "MEXICO \u00b7 CARTELS",
+     "headline": "Mexico seizes 'El Chapo Isidro'",
+     "body": "FBI Top 10 fugitive caught in Guasave; 11 killed as gunmen hit back with burning roadblocks.",
+     "source": "Sources: Reuters, AP"},
 ]
 
-# (kicker, headline, detail, source, icon)
 MEDIUM = [
-    ("GULF", "Three tankers hit in Hormuz",
-     "Ships struck off Oman as IRGC attacks shipping at a record pace.",
-     "UKMTO", "missile"),
-    ("TRADE", "EU and Indonesia sign trade deal",
-     "CEPA ends 98.5% of tariffs after a decade of talks; 730m people.",
-     "EU", "flags"),
-    ("UKRAINE", "Double-tap strike kills 2 in Kryvyi Rih",
-     "Boy, 7, and a paramedic, 20, die; 60 hurt, 25 blocks damaged.",
-     "AP", "burst"),
-    ("BALTIC", "Russian cargo ship ablaze",
-     "Sparta II hit by drones off Finland; crew escapes, no casualties.",
-     "Reuters", "flame"),
-    ("HONG KONG", "Hong Kong votes for Election Committee",
-     "856 candidates chase 723 seats in polls open 9am to 6pm.",
-     "China Daily", "pin"),
-    ("PERU", "Peru counts quake damage",
-     "152 homes uninhabitable after Friday's M6.9; no deaths reported.",
-     "USGS", "globe"),
-    ("HEALTH", "Measles kills a child in Virginia",
-     "First state death since 1978; US has lost elimination status.",
-     "VDH", "bars"),
-    ("UNITED NATIONS", "Killer-robot talks fall short",
-     "UN talks end with no binding rules; states aim for a 2028 deal.",
-     "UN", "summit"),
-    ("FORMULA 1", "Antonelli fastest, Verstappen on pole",
-     "Champion-elect tops Vegas qualifying; a penalty puts Max first.",
-     "F1", "pin"),
-    ("GAZA", "Strike hits vehicle in Gaza City",
-     "Three killed; World Central Kitchen says it was not its vehicle.",
-     "WCK", "flame"),
-    ("FINLAND", "Russian helicopter crosses border",
-     "Suspected incursion flew 4.1 km into Finnish airspace.",
-     "Helsinki", "pin"),
-    ("INDIA", "Modi opens Nitish Setu bridge",
-     "New link joins Patna and Vaishali across the Ganges in Bihar.",
-     "IANS", "flags"),
+    {"kicker": "GULF", "headline": "Three tankers hit in Hormuz",
+     "detail": "Ships struck off Oman as IRGC attacks shipping at a record pace.",
+     "source": "UKMTO", "icon": "missile"},
+    {"kicker": "TRADE", "headline": "EU and Indonesia sign trade deal",
+     "detail": "CEPA ends 98.5% of tariffs after a decade of talks; 730m people.",
+     "source": "EU", "icon": "flags"},
+    {"kicker": "UKRAINE", "headline": "Double-tap strike kills 2 in Kryvyi Rih",
+     "detail": "Boy, 7, and a paramedic, 20, die; 60 hurt, 25 blocks damaged.",
+     "source": "AP", "icon": "burst"},
+    {"kicker": "BALTIC", "headline": "Russian cargo ship ablaze",
+     "detail": "Sparta II hit by drones off Finland; crew escapes, no casualties.",
+     "source": "Reuters", "icon": "flame"},
+    {"kicker": "HONG KONG", "headline": "Hong Kong votes for Election Committee",
+     "detail": "856 candidates chase 723 seats in polls open 9am to 6pm.",
+     "source": "China Daily", "icon": "pin"},
+    {"kicker": "PERU", "headline": "Peru counts quake damage",
+     "detail": "152 homes uninhabitable after Friday's M6.9; no deaths reported.",
+     "source": "USGS", "icon": "globe"},
+    {"kicker": "HEALTH", "headline": "Measles kills a child in Virginia",
+     "detail": "First state death since 1978; US has lost elimination status.",
+     "source": "VDH", "icon": "bars"},
+    {"kicker": "UNITED NATIONS", "headline": "Killer-robot talks fall short",
+     "detail": "UN talks end with no binding rules; states aim for a 2028 deal.",
+     "source": "UN", "icon": "summit"},
+    {"kicker": "FORMULA 1", "headline": "Antonelli fastest, Verstappen on pole",
+     "detail": "Champion-elect tops Vegas qualifying; a penalty puts Max first.",
+     "source": "F1", "icon": "pin"},
+    {"kicker": "GAZA", "headline": "Strike hits vehicle in Gaza City",
+     "detail": "Three killed; World Central Kitchen says it was not its vehicle.",
+     "source": "WCK", "icon": "flame"},
+    {"kicker": "FINLAND", "headline": "Russian helicopter crosses border",
+     "detail": "Suspected incursion flew 4.1 km into Finnish airspace.",
+     "source": "Helsinki", "icon": "pin"},
+    {"kicker": "INDIA", "headline": "Modi opens Nitish Setu bridge",
+     "detail": "New link joins Patna and Vaishali across the Ganges in Bihar.",
+     "source": "IANS", "icon": "flags"},
 ]
 
-# List stories: (text, source). Two columns: items 1-20, then 21-39.
+# List stories as dicts. Two columns: items 1-20, then 21-39.
 LIST_A = [
-    ("US sanctions 4 Iranians over Gulf attacks", "OFAC"),
-    ("CENTCOM denies Iran hit an F-16", "CENTCOM"),
-    ("Mexico: 8 held in Guasave raid", "AP"),
-    ("Haiti: 3 Salvadoran soldiers die in blast", "AP"),
-    ("Basra power station fire: 4 dead, 35 hurt", "AP"),
-    ("Nigeria boat capsize: 24 bodies found", "NEMA"),
-    ("Nigeria starts building naval ships", "Reuters"),
-    ("Ghana unveils Heritage banknotes", "Reuters"),
-    ("Sao Tome PM Ramos reappointed", "AP"),
-    ("Tigray mayor vows vote in 6 months", "AP"),
-    ("Sahel states reopen ECOWAS dialogue", "Reuters"),
-    ("Kenya: 293,600 Saudi jobs secured", "Reuters"),
-    ("Kenya discharges last Ebola patient", "WHO"),
-    ("DRC Ebola toll passes 5,300", "WHO"),
-    ("DRC enacts constitutional reform law", "Reuters"),
-    ("S. Africa: protest as police bar rallies", "Reuters"),
-    ("S. Africa power chaos tests ANC", "Reuters"),
-    ("Awar Odhiang named model of the year", "AP"),
-    ("Tyla, Tems, Kidjo lead Grammy hopes", "AP"),
-    ("US measles cases pass 5,400 in 2026", "NBC"),
+    {"text": "US sanctions 4 Iranians over Gulf attacks", "source": "OFAC"},
+    {"text": "CENTCOM denies Iran hit an F-16", "source": "CENTCOM"},
+    {"text": "Mexico: 8 held in Guasave raid", "source": "AP"},
+    {"text": "Haiti: 3 Salvadoran soldiers die in blast", "source": "AP"},
+    {"text": "Basra power station fire: 4 dead, 35 hurt", "source": "AP"},
+    {"text": "Nigeria boat capsize: 24 bodies found", "source": "NEMA"},
+    {"text": "Nigeria starts building naval ships", "source": "Reuters"},
+    {"text": "Ghana unveils Heritage banknotes", "source": "Reuters"},
+    {"text": "Sao Tome PM Ramos reappointed", "source": "AP"},
+    {"text": "Tigray mayor vows vote in 6 months", "source": "AP"},
+    {"text": "Sahel states reopen ECOWAS dialogue", "source": "Reuters"},
+    {"text": "Kenya: 293,600 Saudi jobs secured", "source": "Reuters"},
+    {"text": "Kenya discharges last Ebola patient", "source": "WHO"},
+    {"text": "DRC Ebola toll passes 5,300", "source": "WHO"},
+    {"text": "DRC enacts constitutional reform law", "source": "Reuters"},
+    {"text": "S. Africa: protest as police bar rallies", "source": "Reuters"},
+    {"text": "S. Africa power chaos tests ANC", "source": "Reuters"},
+    {"text": "Awar Odhiang named model of the year", "source": "AP"},
+    {"text": "Tyla, Tems, Kidjo lead Grammy hopes", "source": "AP"},
+    {"text": "US measles cases pass 5,400 in 2026", "source": "NBC"},
 ]
 LIST_B = [
-    ("Kyiv bridge toll rises to 9 dead", "Reuters"),
-    ("Croatia rallies over hospital death", "AP"),
-    ("Paolo Bulgari dies", "AP"),
-    ("Denmark expels Russian defence envoy", "Reuters"),
-    ("EU proposes EUR 1.78tn budget 2028-34", "EU"),
-    ("Crude oil futures fall 3%+", "MCX"),
-    ("India-Canada end CEPA round 6", "IANS"),
-    ("Nikhil Gupta jailed 235 months in US", "DoJ"),
-    ("Air India extends Jeddah halt to Nov 24", "IANS"),
-    ("Japan to train live-fire in India, first", "IANS"),
-    ("Cyclone Akvan: 14 Ranchi flights axed", "IANS"),
-    ("KL Rahul 136, India 486/4 v NZ", "IANS"),
-    ("Australia bowl first; Smith out", "CA"),
-    ("Pat Cummins keeps Australia captaincy", "CA"),
-    ("Cheetah gives birth to 4 cubs in Kuno", "IANS"),
-    ("Bhashini AI passes 11bn inferences", "IANS"),
-    ("Top court rejects Tamil Nadu water plea", "IANS"),
-    ("Manipur liquor kills 11, sickens 180", "AP"),
-    ("IAF Air Festival opens in Nagpur", "IANS"),
+    {"text": "Kyiv bridge toll rises to 9 dead", "source": "Reuters"},
+    {"text": "Croatia rallies over hospital death", "source": "AP"},
+    {"text": "Paolo Bulgari dies", "source": "AP"},
+    {"text": "Denmark expels Russian defence envoy", "source": "Reuters"},
+    {"text": "EU proposes EUR 1.78tn budget 2028-34", "source": "EU"},
+    {"text": "Crude oil futures fall 3%+", "source": "MCX"},
+    {"text": "India-Canada end CEPA round 6", "source": "IANS"},
+    {"text": "Nikhil Gupta jailed 235 months in US", "source": "DoJ"},
+    {"text": "Air India extends Jeddah halt to Nov 24", "source": "IANS"},
+    {"text": "Japan to train live-fire in India, first", "source": "IANS"},
+    {"text": "Cyclone Akvan: 14 Ranchi flights axed", "source": "IANS"},
+    {"text": "KL Rahul 136, India 486/4 v NZ", "source": "IANS"},
+    {"text": "Australia bowl first; Smith out", "source": "CA"},
+    {"text": "Pat Cummins keeps Australia captaincy", "source": "CA"},
+    {"text": "Cheetah gives birth to 4 cubs in Kuno", "source": "IANS"},
+    {"text": "Bhashini AI passes 11bn inferences", "source": "IANS"},
+    {"text": "Top court rejects Tamil Nadu water plea", "source": "IANS"},
+    {"text": "Manipur liquor kills 11, sickens 180", "source": "AP"},
+    {"text": "IAF Air Festival opens in Nagpur", "source": "IANS"},
 ]
 
 TIMELINE = [
-    ("00:05", "Iran strikes Bahrain bases"),
-    ("00:29", "UN weapons talks fall short"),
-    ("00:47", "Three tankers hit near Hormuz"),
-    ("01:00", "Hong Kong polls open"),
-    ("01:52", "Ghana unveils banknotes"),
-    ("02:15", "Peru quake toll: 152 homes"),
+    {"time": "00:05", "event": "Iran strikes Bahrain bases"},
+    {"time": "00:29", "event": "UN weapons talks fall short"},
+    {"time": "00:47", "event": "Three tankers hit near Hormuz"},
+    {"time": "01:00", "event": "Hong Kong polls open"},
+    {"time": "01:52", "event": "Ghana unveils banknotes"},
+    {"time": "02:15", "event": "Peru quake toll: 152 homes"},
 ]
 
 DATECHECK = [
@@ -447,29 +455,27 @@ DATECHECK = [
     "Not yet: COP31 final text, due overnight.",
 ]
 
-FOOTER = ("Every story here happened, or was first reported, on Sunday "
-          "22 November 2026; claims are attributed. Sources: Reuters, AP, "
-          "AFP, BBC, IANS, UN and others.")
+FOOTER = "Every story here happened, or was first reported, on Sunday 22 November 2026; claims are attributed. Sources: Reuters, AP, AFP, BBC, IANS, UN and others."
 
-# Map dots: (number, lon, lat, dx, dy) -- dx/dy nudge the drawn dot away
-# from its true position (leader line links them) so crowded dots do not
-# overlap. Numbers match the legend under the map.
+# Map dots: dx/dy nudge the drawn dot away from its true position (a
+# leader line links them) so crowded dots do not overlap. Numbers match
+# the legend under the map.
 MAP_DOTS = [
-    (1, 50.6, 26.2, -14, -10),   # Manama
-    (2, 51.4, 35.7, 16, -12),    # Tehran
-    (3, 56.5, 26.6, 14, 10),     # Hormuz
-    (4, 30.7, 36.9, -14, -10),   # Antalya
-    (5, 4.4, 50.9, -12, -8),     # Brussels
-    (6, -108.5, 25.6, -10, 10),  # Guasave
-    (7, 33.4, 47.9, 0, 0),       # Kryvyi Rih
-    (8, 25.0, 60.2, 12, -10),    # Helsinki
-    (9, 114.2, 22.3, 0, 0),      # Hong Kong
-    (10, -76.0, -11.0, 0, 0),    # Junin
-    (11, -77.5, 37.5, -12, 8),   # Richmond
-    (12, 6.1, 46.2, 12, 8),      # Geneva
-    (13, -115.1, 36.2, -12, -10),  # Las Vegas
-    (14, 34.5, 31.5, 10, 12),    # Gaza
-    (15, -0.2, 5.6, 0, 0),       # Accra
+    {"n": 1, "place": "Manama", "lon": 50.6, "lat": 26.2, "dx": -14, "dy": -10},
+    {"n": 2, "place": "Tehran", "lon": 51.4, "lat": 35.7, "dx": 16, "dy": -12},
+    {"n": 3, "place": "Hormuz", "lon": 56.5, "lat": 26.6, "dx": 14, "dy": 10},
+    {"n": 4, "place": "Antalya", "lon": 30.7, "lat": 36.9, "dx": -14, "dy": -10},
+    {"n": 5, "place": "Brussels", "lon": 4.4, "lat": 50.9, "dx": -12, "dy": -8},
+    {"n": 6, "place": "Guasave", "lon": -108.5, "lat": 25.6, "dx": -10, "dy": 10},
+    {"n": 7, "place": "Kryvyi Rih", "lon": 33.4, "lat": 47.9, "dx": 0, "dy": 0},
+    {"n": 8, "place": "Helsinki", "lon": 25.0, "lat": 60.2, "dx": 12, "dy": -10},
+    {"n": 9, "place": "Hong Kong", "lon": 114.2, "lat": 22.3, "dx": 0, "dy": 0},
+    {"n": 10, "place": "Junin", "lon": -76.0, "lat": -11.0, "dx": 0, "dy": 0},
+    {"n": 11, "place": "Richmond", "lon": -77.5, "lat": 37.5, "dx": -12, "dy": 8},
+    {"n": 12, "place": "Geneva", "lon": 6.1, "lat": 46.2, "dx": 12, "dy": 8},
+    {"n": 13, "place": "Las Vegas", "lon": -115.1, "lat": 36.2, "dx": -12, "dy": -10},
+    {"n": 14, "place": "Gaza", "lon": 34.5, "lat": 31.5, "dx": 10, "dy": 12},
+    {"n": 15, "place": "Accra", "lon": -0.2, "lat": 5.6, "dx": 0, "dy": 0},
 ]
 MAP_LEGEND = [
     "1 Manama  2 Tehran  3 Hormuz  4 Antalya",
@@ -726,43 +732,43 @@ def render_page(pg, tp):
     # ---- timeline
     tp.draw(pg, "sansb10", 12, 80, "THE DAY IN UTC", RED)
     pg.hline(140, 980, 99, INK, 1)
-    for (tm, ev), tick in zip(TIMELINE, TICK_X):
+    for slot, tick in zip(TIMELINE, TICK_X):
         pg.vline(tick, 95, 103, INK, 1)
-        tp.draw(pg, "sansb10", tick - tp.width("sansb10", tm) // 2, 82,
-                tm, INK)
-        tp.draw(pg, "sans10", tick - tp.width("sans10", ev) // 2, 102,
-                ev, INK)
+        tp.draw(pg, "sansb10", tick - tp.width("sansb10", slot["time"]) // 2, 82,
+                slot["time"], INK)
+        tp.draw(pg, "sans10", tick - tp.width("sans10", slot["event"]) // 2, 102,
+                slot["event"], INK)
 
     # ---- leads
     art_fns = [art_gulf, art_climate, art_cartel]
-    for i, (cat, headline, body, src) in enumerate(LEADS):
+    for i, lead in enumerate(LEADS):
         lx = LEAD_COLS[i]
         if i == 2:
             art_fns[i](pg, tp, lx, 118, 324, 112)
         else:
             art_fns[i](pg, lx, 118, 324, 112)
         draw_frame(pg, lx, 118, 324, 112, INK)
-        tp.draw(pg, "sansb10", lx, 236, cat, RED)
-        wrapped = tp.wrap("sansb22", headline, 324)[:3]
+        tp.draw(pg, "sansb10", lx, 236, lead["kicker"], RED)
+        wrapped = tp.wrap("sansb22", lead["headline"], 324)[:3]
         for j, txt in enumerate(wrapped):
             tp.draw(pg, "sansb22", lx, 252 + j * 26, txt, INK)
-        for j, txt in enumerate(tp.wrap("sans12", body, 324)[:2]):
+        for j, txt in enumerate(tp.wrap("sans12", lead["body"], 324)[:2]):
             tp.draw(pg, "sans12", lx, 332 + j * 15, txt, INK)
-        tp.draw(pg, "sans10", lx, 364, src, GREY)
+        tp.draw(pg, "sans10", lx, 364, lead["source"], GREY)
     pg.hline(12, 1012, 382, INK, 1)
 
     # ---- medium stories: 6 columns, 2 rows
-    for k, (cat, headline, detail, src, icon) in enumerate(MEDIUM):
+    for k, item in enumerate(MEDIUM):
         col, row = k % 6, k // 6
         mx = MED_COLS[col]
         ry = 388 + row * 110
-        pictogram(pg, icon, mx, ry)
-        tp.draw(pg, "sansb10", mx + 34, ry + 8, cat, RED)
-        for j, txt in enumerate(tp.wrap("sansb15", headline, 160)[:2]):
+        pictogram(pg, item["icon"], mx, ry)
+        tp.draw(pg, "sansb10", mx + 34, ry + 8, item["kicker"], RED)
+        for j, txt in enumerate(tp.wrap("sansb15", item["headline"], 160)[:2]):
             tp.draw(pg, "sansb15", mx, ry + 32 + j * 17, txt, INK)
-        for j, txt in enumerate(tp.wrap("sans10", detail, 160)[:2]):
+        for j, txt in enumerate(tp.wrap("sans10", item["detail"], 160)[:2]):
             tp.draw(pg, "sans10", mx, ry + 68 + j * 12, txt, INK)
-        tp.draw(pg, "sans10", mx, ry + 92, src, GREY)
+        tp.draw(pg, "sans10", mx, ry + 92, item["source"], GREY)
     pg.hline(12, 1012, 606, INK, 1)
 
     # ---- bottom section headers
@@ -785,14 +791,14 @@ def render_page(pg, tp):
     for poly_lonlat in CONTINENTS:
         pg.poly([project(lon, lat) for lon, lat in poly_lonlat], LAND)
     draw_frame(pg, MAP_X, MAP_Y, MAP_W, MAP_H, INK)
-    for num, lon, lat, dx, dy in MAP_DOTS:
-        sx, sy = project(lon, lat)
-        dotx, doty = sx + dx, sy + dy
-        if dx or dy:
+    for dot in MAP_DOTS:
+        sx, sy = project(dot["lon"], dot["lat"])
+        dotx, doty = sx + dot["dx"], sy + dot["dy"]
+        if dot["dx"] or dot["dy"]:
             pg.line(sx, sy, dotx, doty, INK)
             pg.circle(sx, sy, 2, RED)
         pg.circle(dotx, doty, 7, RED)
-        tag = str(num)
+        tag = str(dot["n"])
         tp.draw(pg, "sansb10", dotx - tp.width("sansb10", tag) // 2,
                 doty - 6, tag, WHITE)
     for j, txt in enumerate(MAP_LEGEND):
@@ -807,12 +813,12 @@ def render_page(pg, tp):
 
     # ---- list columns
     for colx, items in ((354, LIST_A), (676, LIST_B)):
-        for j, (text, src) in enumerate(items):
+        for j, item in enumerate(items):
             y = 634 + j * 17
             pg.rect(colx, y + 4, 9, 3, RED)
             pg.rect(colx, y + 7, 9, 3, NAVY)
-            after = tp.draw(pg, "sans12", colx + 13, y, text, INK)
-            tp.draw(pg, "sans12", after, y, " [" + src + "]", GREY)
+            after = tp.draw(pg, "sans12", colx + 13, y, item["text"], INK)
+            tp.draw(pg, "sans12", after, y, " [" + item["source"] + "]", GREY)
 
     # ---- footer
     pg.hline(12, 1012, 1006, GREY, 1)
