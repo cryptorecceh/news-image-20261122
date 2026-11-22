@@ -443,16 +443,16 @@ TIMELINE = [
 ]
 
 DATECHECK = [
-    "Voyager 1 reaches one light-day \u2014 Wed 18 Nov",
-    "Jensen Huang quits Nvidia \u2014 Thu 12 Nov",
-    "Norway court voids 3 oil licences \u2014 Fri 13 Nov",
-    "Lagarde to leave ECB in Feb 2027 \u2014 Thu 29 Oct",
-    "Democrats take Congress in midterms \u2014 Tue 3 Nov",
-    "Peru M6.9 quake shakes Junin \u2014 Fri 20 Nov",
-    "ICJ rules Myanmar committed genocide \u2014 Fri 20 Nov",
-    "Kerch bridge span collapses \u2014 Tue 17 Nov",
-    "Shenzhen peace declaration \u2014 Thu 19 Nov",
-    "Not yet: COP31 final text, due overnight.",
+    {"text": "Voyager 1 reaches one light-day \u2014 Wed 18 Nov"},
+    {"text": "Jensen Huang quits Nvidia \u2014 Thu 12 Nov"},
+    {"text": "Norway court voids 3 oil licences \u2014 Fri 13 Nov"},
+    {"text": "Lagarde to leave ECB in Feb 2027 \u2014 Thu 29 Oct"},
+    {"text": "Democrats take Congress in midterms \u2014 Tue 3 Nov"},
+    {"text": "Peru M6.9 quake shakes Junin \u2014 Fri 20 Nov"},
+    {"text": "ICJ rules Myanmar committed genocide \u2014 Fri 20 Nov"},
+    {"text": "Kerch bridge span collapses \u2014 Tue 17 Nov"},
+    {"text": "Shenzhen peace declaration \u2014 Thu 19 Nov"},
+    {"text": "Not yet: COP31 final text, due overnight."},
 ]
 
 FOOTER = "Every story here happened, or was first reported, on Sunday 22 November 2026; claims are attributed. Sources: Reuters, AP, AFP, BBC, IANS, UN and others."
@@ -477,12 +477,10 @@ MAP_DOTS = [
     {"n": 14, "place": "Gaza", "lon": 34.5, "lat": 31.5, "dx": 10, "dy": 12},
     {"n": 15, "place": "Accra", "lon": -0.2, "lat": 5.6, "dx": 0, "dy": 0},
 ]
-MAP_LEGEND = [
-    "1 Manama  2 Tehran  3 Hormuz  4 Antalya",
-    "5 Brussels  6 Guasave  7 Kryvyi Rih  8 Helsinki",
-    "9 Hong Kong  10 Junin  11 Richmond  12 Geneva",
-    "13 Las Vegas  14 Gaza  15 Accra",
-]
+MAP_LEGEND = ("1 Manama  2 Tehran  3 Hormuz  4 Antalya\n"
+              "5 Brussels  6 Guasave  7 Kryvyi Rih  8 Helsinki\n"
+              "9 Hong Kong  10 Junin  11 Richmond  12 Geneva\n"
+              "13 Las Vegas  14 Gaza  15 Accra")
 
 # Coarse equirectangular continent outlines (lon, lat), stylised.
 NORTH_AMERICA = [(-168, 66), (-150, 70), (-135, 69), (-125, 71), (-115, 73),
@@ -801,7 +799,7 @@ def render_page(pg, tp):
         tag = str(dot["n"])
         tp.draw(pg, "sansb10", dotx - tp.width("sansb10", tag) // 2,
                 doty - 6, tag, WHITE)
-    for j, txt in enumerate(MAP_LEGEND):
+    for j, txt in enumerate(MAP_LEGEND.split("\n")):
         tp.draw(pg, "sans10", 12, 798 + j * 12, txt, INK)
 
     # ---- date check box
@@ -809,7 +807,7 @@ def render_page(pg, tp):
     tp.draw(pg, "sansb10", 20, 856, "DATE CHECK \u2014 LEFT OUT AS OLDER NEWS",
             RED)
     for j, item in enumerate(DATECHECK):
-        tp.draw(pg, "sans10", 20, 872 + j * 12, item, INK)
+        tp.draw(pg, "sans10", 20, 872 + j * 12, item["text"], INK)
 
     # ---- list columns
     for colx, items in ((354, LIST_A), (676, LIST_B)):
